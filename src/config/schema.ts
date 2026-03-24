@@ -1,4 +1,6 @@
 import Ajv from "ajv";
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+const AjvClass = (Ajv as unknown as { default: typeof Ajv }).default ?? Ajv;
 
 export interface CredentialConfig {
   name: string;
@@ -166,7 +168,7 @@ export interface ValidationResult {
   errors?: string[];
 }
 
-const ajv = new Ajv({ allErrors: true });
+const ajv = new AjvClass({ allErrors: true });
 const validate = ajv.compile(configJsonSchema);
 
 export function validateConfig(data: unknown): ValidationResult {
