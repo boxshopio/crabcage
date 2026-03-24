@@ -6,9 +6,9 @@
 
 ## Overview
 
-Crabcage is a config-driven CLI that launches auditable sandboxes for AI coding agents. Container isolation is the foundation. Safety classification and cryptographic audit are opt-in layers.
+Crabcage is an auditable sandbox for agent harnesses. Run your AI coding agent in a container so `--dangerously-skip-permissions` isn't actually dangerous — your local filesystem, credentials, and production systems are isolated by default. Then dial in additional protections as needed: safety classification to catch accidental destructive commands, cryptographic audit to prove what happened, network filtering to control egress.
 
-**Tagline:** The auditable sandbox for AI coding agents.
+**Tagline:** An auditable sandbox for agent harnesses. Dial in protections, or run dangerously without the danger.
 
 **What it is NOT:** An orchestration platform, a Kubernetes control plane, or a devcontainer for human development.
 
@@ -24,7 +24,7 @@ No existing solution combines container isolation, contextual safety classificat
 - **nah** — contextual safety classification, but standalone tool, no container integration
 - **punkgo-jack** — cryptographic audit receipts, but standalone tool, no container integration
 
-Crabcage integrates these into a single, layered, config-driven experience.
+Crabcage integrates these into a single tool where the container provides baseline safety (your filesystem is untouched even if the agent goes off the rails) and everything else is a dial you turn up as needed.
 
 ## Architecture
 
@@ -184,7 +184,7 @@ cd my-project
 crabcage run
 ```
 
-Mounts current directory, pulls pre-built image, launches Claude Code. No YAML, no config file. Safety and audit are off by default.
+Mounts current directory, pulls pre-built image, launches Claude Code with `--dangerously-skip-permissions`. No YAML, no config file. The container is the sandbox — your local filesystem is already protected. Safety classification and audit are off by default, ready to dial in.
 
 ### Progressive Opt-In
 
