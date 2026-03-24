@@ -143,9 +143,11 @@ Applied by default — no configuration needed:
 - Isolated bridge network
 - Mount path denylist (refuses `~/.ssh`, `~/.aws`, `~/`, `/`)
 
-## Contributing
+## Philosophy
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+This is our opinionated attempt to make it safer to run AI agent harnesses. We don't think we have all the answers — the landscape is moving fast and new risks surface regularly.
+
+We're open to [contributions](CONTRIBUTING.md) and [issues](https://github.com/boxshopio/crabcage/issues) suggesting other approaches, tweaks to existing layers, or entirely new protection layers we haven't thought of.
 
 ## License
 
