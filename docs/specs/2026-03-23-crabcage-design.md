@@ -69,6 +69,15 @@ Stage 2 (runtime): debian:bookworm-slim
 --network=crabcage-net         # isolated bridge network
 ```
 
+**Writable paths despite `--read-only`:** The root filesystem is immutable, but these paths are writable via volumes or tmpfs:
+- `/home/claude/repos` — repo volume (persistent)
+- `/home/claude/.claude` — config volume (persistent)
+- `/home/claude/.local` — tmpfs (Python user-site packages from `tools:` commands, ephemeral)
+- `/var/audit` — audit volume (persistent, audit user only)
+- `/tmp`, `/var/tmp` — tmpfs (scratch space, ephemeral)
+
+The `tools:` commands from `.sandbox.yml` (e.g., `uv pip install -e ...`) run at container startup **before** Claude Code starts. They install to `/home/claude/.local` (Python user-site), which is a tmpfs mount. This means custom tools are re-installed on each container launch — acceptable since `uv pip install` is fast and the tools are already cloned in the repos volume.
+
 No Docker socket. No `--privileged`. No host PID/network namespace.
 
 **Users inside the container:**
@@ -135,6 +144,8 @@ Aborting. Fix the above and retry.
 ```
 
 The `help` field from the config provides the actionable fix message. The launcher does not parse command output for scope or token details — it only checks whether the credential is present and the check command succeeds.
+
+**Execution context:** Credential checks run on the **host**, before the container starts. The check commands (e.g., `gh auth status`, `aws sts get-caller-identity`) must be available in the user's host environment. If a check command is not found, the launcher warns but does not fail — the credential is treated as unverified.
 
 ## Implementation
 
@@ -326,7 +337,7 @@ Everything else uses defaults. Credentials detected from environment. Current di
 4. CLI flags (`--safety autonomous`)
 5. Environment variables (`CRABCAGE_SAFETY_PRESET=autonomous`)
 
-**Safety-specific constraint:** For `safety` settings, overrides can only **tighten** policy, never relax it. This matches nah's own philosophy for per-project configs. For example, if `.sandbox.yml` sets `preset: supervised`, an env var cannot downgrade to `minimal`. It can upgrade to `autonomous` (stricter). Non-safety settings (image, credentials, repos) follow normal precedence.
+**Safety-specific constraint:** For `safety` settings, overrides can only **tighten** policy, never relax it. This matches nah's own philosophy for per-project configs. For example, if `.sandbox.yml` sets `preset: supervised`, a CLI flag or env var cannot relax to `minimal` (less restrictive). It can tighten to `autonomous` (more restrictive — blocks more actions). Non-safety settings (image, credentials, repos) follow normal precedence.
 
 ## Safety Presets
 
@@ -353,7 +364,7 @@ Human watching. Claude works freely on safe operations, asks before anything imp
 | network_outbound | context (nah decides per-target) |
 | process_signal (kill) | ask |
 | obfuscated (base64 pipes, decode+exec) | block |
-| env/printenv/set | block |
+| credential_exposure (env/printenv/set) | block |
 
 ### `autonomous`
 
@@ -372,7 +383,7 @@ Fire-and-forget. Destructive local operations are blocked. Remote writes (push b
 | network_outbound | allowlist only |
 | process_signal | block |
 | obfuscated | block |
-| env/printenv/set | block |
+| credential_exposure (env/printenv/set) | block |
 
 ### `minimal`
 
@@ -435,7 +446,7 @@ Two users, two volumes, no cross-access. Claude cannot read, write, or kill the 
 5. `punkgo-jack` PostToolUse hook fires — records the outcome (success/failure/blocked)
 6. Every 5 minutes, punkgo-jack anchors a checkpoint via RFC 3161 TSA (DigiCert)
 
-**Inter-hook communication:** Claude Code hooks fire independently — there is no built-in pipeline between hooks. The nah→punkgo-jack data flow uses a shared file (`/tmp/nah-decisions.jsonl`) as the coordination mechanism. nah appends a decision line; punkgo-jack reads the latest line matching the current tool invocation. The file lives on tmpfs and is ephemeral. If nah fails to write (or is disabled), punkgo-jack records the event without classification data — the audit chain is never broken by a safety layer failure.
+**Inter-hook communication:** Claude Code hooks fire independently — there is no built-in pipeline between hooks. The nah→punkgo-jack data flow uses a shared file (`/tmp/nah-decisions.jsonl`) as the coordination mechanism. nah appends a decision line; punkgo-jack reads the latest line matching the current tool invocation. Each decision line includes a correlation key (tool name + timestamp + a monotonic sequence number) so punkgo-jack can match the correct decision even when multiple tool calls fire in rapid succession. The file lives on tmpfs and is ephemeral. If nah fails to write (or is disabled), punkgo-jack records the event without classification data — the audit chain is never broken by a safety layer failure.
 
 **MCP tool coverage:** Claude Code's hook system fires PreToolUse/PostToolUse for MCP tool calls, but this must be verified empirically during implementation. If MCP calls bypass the hook chain, crabcage will add a network-level audit fallback: logging outbound HTTP requests from the container via the DNS sidecar or a transparent proxy. This is a **v1 implementation task** — the spec assumes hooks cover MCP, with a documented fallback if they don't.
 
