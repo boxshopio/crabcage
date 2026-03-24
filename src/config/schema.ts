@@ -1,6 +1,6 @@
-import Ajv from "ajv";
-// eslint-disable-next-line @typescript-eslint/no-redeclare
-const AjvClass = (Ajv as unknown as { default: typeof Ajv }).default ?? Ajv;
+import AjvModule from "ajv";
+// Ajv CJS/ESM interop: the default export is a namespace, constructor is on .default
+const Ajv = AjvModule.default;
 
 export interface CredentialConfig {
   name: string;
@@ -168,7 +168,7 @@ export interface ValidationResult {
   errors?: string[];
 }
 
-const ajv = new AjvClass({ allErrors: true });
+const ajv = new Ajv({ allErrors: true });
 const validate = ajv.compile(configJsonSchema);
 
 export function validateConfig(data: unknown): ValidationResult {
@@ -178,6 +178,6 @@ export function validateConfig(data: unknown): ValidationResult {
   }
   return {
     valid: false,
-    errors: validate.errors?.map((e) => `${e.instancePath || "/"}: ${e.message}`) ?? [],
+    errors: validate.errors?.map((e: { instancePath?: string; message?: string }) => `${e.instancePath || "/"}: ${e.message}`) ?? [],
   };
 }
