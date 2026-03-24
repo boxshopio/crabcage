@@ -87,14 +87,14 @@ Stage 2 (runtime): debian:bookworm-slim
 --network=crabcage-net         # isolated bridge network
 ```
 
-**Writable paths despite `--read-only`:** The root filesystem is immutable, but these paths are writable via volumes or tmpfs:
-- `/home/claude/repos` — repo volume (persistent)
+**Writable paths despite `--read-only`:** The root filesystem is immutable, but these paths are writable via volumes, bind mounts, or tmpfs:
+- `/home/claude/repos` (or other mount points) — bind-mounted host directories (persistent, changes reflect on host)
 - `/home/claude/.claude` — config volume (persistent)
-- `/home/claude/.local` — tmpfs (Python user-site packages from `tools:` commands, ephemeral)
+- `/home/claude/.local` — tmpfs (Python user-site packages from `setup:` commands, ephemeral)
 - `/var/audit` — audit volume (persistent, audit user only)
 - `/tmp`, `/var/tmp` — tmpfs (scratch space, ephemeral)
 
-The `tools:` commands from `.sandbox.yml` (e.g., `uv pip install -e ...`) run at container startup **before** Claude Code starts. They install to `/home/claude/.local` (Python user-site), which is a tmpfs mount. This means custom tools are re-installed on each container launch — acceptable since `uv pip install` is fast and the tools are already cloned in the repos volume.
+The `setup:` commands from `.sandbox.yml` (e.g., `uv pip install -e ...`) run at container startup **before** Claude Code starts. They install to `/home/claude/.local` (Python user-site), which is a tmpfs mount. This means custom tools are re-installed on each container launch — acceptable since `uv pip install` is fast and the source code is in the bind-mounted directory.
 
 No Docker socket. No `--privileged`. No host PID/network namespace.
 
@@ -105,15 +105,17 @@ No Docker socket. No `--privileged`. No host PID/network namespace.
 | `claude` (UID configurable) | Runs Claude Code, owns repo workspace |
 | `audit` | Runs punkgo-jack daemon, owns audit logs and signing key. Claude user cannot signal audit's processes (standard Unix: non-root users cannot signal other users' processes) or read audit-owned files (directory permissions 0700). Combined with `--security-opt=no-new-privileges`, the claude user cannot escalate to audit. |
 
-**Volumes:**
+**Volumes and mounts:**
 
-| Volume | Mount Point | Owner | Purpose |
+| Type | Mount Point | Owner | Purpose |
 |---|---|---|---|
-| `crabcage-repos` | `/home/claude/repos` | claude | Code workspace |
-| `crabcage-config` | `/home/claude/.claude` | claude | Claude Code settings, session history, hooks |
-| `crabcage-audit` | `/var/audit` | audit | Merkle tree, receipts, signing key (0400) |
+| Bind mount | `/home/claude/repos` (or mapped from host path) | claude | Code workspace — host directories mounted per config |
+| Named volume | `/home/claude/.claude` | claude | Claude Code settings, session history, hooks |
+| Named volume | `/var/audit` | audit | Merkle tree, receipts, signing key (0400) |
 
-The repo volume is the only persistent data Claude can write to. Config volume persists Claude Code state across sessions. Audit volume is inaccessible to the claude user.
+Host directories are bind-mounted into the container (read-write by default, `:ro` suffix for read-only). The config volume persists Claude Code state across sessions. Audit volume is inaccessible to the claude user.
+
+**Mount path mapping:** Host paths are mapped predictably into the container. `~/repos` → `/home/claude/repos`, `~/data/fixtures` → `/home/claude/data/fixtures`. Absolute paths outside `$HOME` use explicit mapping (e.g., `/opt/shared:/mnt/shared:ro`). The current working directory is always mounted at `/home/claude/work`.
 
 **Services (sidecars, not Docker socket):**
 
@@ -298,13 +300,25 @@ Which credentials does your agent need?
   ? AWS credentials [y/N]: y
   ? Other (name):
 
-── Repo Provisioning ────────────────────────────────────
-Command to clone/update your repos inside the container (optional):
-> bs pull
+── Mounts ──────────────────────────────────────────────
+Which directories should the agent have access to?
+The current directory is always mounted.
+
+  Additional paths (comma-separated, or blank):
+  > ~/repos
+
+  Any paths that should be read-only?
+  > ~/repos/boxshop-config:ro
+
+── Setup Commands ──────────────────────────────────────
+Commands to run inside the container on first launch (optional):
+  > bs pull
+  > uv pip install -e /home/claude/repos/kingmaker
 
 ── Summary ──────────────────────────────────────────────
 
   Container isolation    ✓ always on
+  Mounts                 ✓ . + ~/repos (boxshop-config read-only)
   Command approval       ✓ supervised (nah)
   Git guardrails         ✓ push + PR only (no merge)
   Credential scoping     ⚠ recommended (see docs)
@@ -330,6 +344,13 @@ agent: claude  # claude | codex | gemini (future)
 # Image pinning (optional — defaults to latest)
 image: ghcr.io/boxshopio/crabcage:1.2.0
 
+# Bind mounts from host filesystem
+# Current directory is always mounted. Additional paths listed here.
+# Append :ro for read-only.
+mounts:
+  - ~/repos
+  - ~/data/fixtures:ro
+
 # Credentials — validated before launch
 credentials:
   - name: GH_TOKEN
@@ -341,18 +362,16 @@ credentials:
   - name: CF_API_TOKEN
     required: false
 
-# Repo provisioning
-# init: runs when the repos volume is empty (detected via marker file .crabcage-initialized)
-# update: runs on subsequent launches when the marker file exists
-repos:
-  init: bs pull
-  update: bs pull
-  path: /home/claude/repos
-
-# Additional tools installed at first launch
-tools:
-  - uv pip install -e /home/claude/repos/kingmaker
-  - uv pip install -e /home/claude/repos/boxshop-cli
+# Commands to run inside the container at startup
+# init: runs when marker file .crabcage-initialized is absent (first launch)
+# update: runs on subsequent launches
+setup:
+  init:
+    - bs pull
+    - uv pip install -e /home/claude/repos/kingmaker
+    - uv pip install -e /home/claude/repos/boxshop-cli
+  update:
+    - bs pull
 
 # Git guardrails
 git:
@@ -662,6 +681,9 @@ Private config in `boxshop-config` (not in the open-source repo).
 ```yaml
 agent: claude
 
+mounts:
+  - ~/repos
+
 credentials:
   - name: GH_TOKEN
     check: gh auth status
@@ -673,15 +695,14 @@ credentials:
     required: false
     help: "Run: export CF_API_TOKEN=<token from 1Password>"
 
-repos:
-  init: bs pull
-  update: bs pull
-  path: /home/claude/repos
-
-tools:
-  - uv pip install -e /home/claude/repos/kingmaker
-  - uv pip install -e /home/claude/repos/boxshop-cli
-  - uv pip install -e /home/claude/repos/kingslanding-cli
+setup:
+  init:
+    - bs pull
+    - uv pip install -e /home/claude/repos/kingmaker
+    - uv pip install -e /home/claude/repos/boxshop-cli
+    - uv pip install -e /home/claude/repos/kingslanding-cli
+  update:
+    - bs pull
 
 safety:
   enabled: true
@@ -785,12 +806,14 @@ All injected credentials are visible as env vars inside the container. Mitigatio
 - AWS session tokens are short-lived
 - The container cannot access host credential files (they're injected, not mounted)
 
-**Repo volumes are the weakest link:**
+**Bind-mounted directories are the weakest link:**
 
-The repo volume is persistent and writable. Git destructive operations (force push, reset --hard) are the highest-impact accident path. Mitigations:
+Bind-mounted host directories are writable by the agent (unless `:ro`). Git destructive operations (force push, reset --hard) and file deletion are the highest-impact accident paths. Mitigations:
 - `nah` hard-blocks git history rewrites by default
+- Git guardrails block merge and force push
 - GitHub branch protection rules operate outside the container (strongest control)
-- Pre-session volume snapshots (future enhancement)
+- Read-only mounts (`:ro`) for directories the agent should only read
+- Git makes most file-level damage recoverable (`git checkout`, `git stash`)
 
 ### Hardening Checklist
 
