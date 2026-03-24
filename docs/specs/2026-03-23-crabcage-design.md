@@ -14,17 +14,25 @@ Crabcage is an auditable sandbox for agent harnesses. Run your AI coding agent i
 
 **That's what the other layers are for.** Each one addresses a different category of risk:
 
-| Protection Layer | What it does | Why |
-|---|---|---|
-| Container isolation | Filesystem separation from host | Agent can't touch your real files |
-| Command approval (nah) | Classifies commands as allow/ask/block | Catch destructive commands before they run |
-| Git guardrails | Control push/PR/merge/force-push independently | Humans review and merge, agent proposes |
-| Credential scoping | Read-only for prod, full for dev | Agent can investigate prod but can't break it |
-| Data locality | Repos are clones, not mounts | Agent works on a copy, originals untouched |
-| Audit trail (punkgo-jack) | Cryptographic receipts for every action | Prove what happened, tune policies over time |
-| Network filtering | DNS allowlist for egress | Prevent accidental exfiltration or wrong-env calls |
+| Protection Layer | What it does | Why | Enforced by |
+|---|---|---|---|
+| Container isolation | Filesystem separation from host | Agent can't touch unmounted files | Container boundary |
+| Command approval (nah) | Classifies commands as allow/ask/block | Catch destructive commands before they run | nah hooks |
+| Git guardrails | Control push/PR/merge/force-push independently | Humans review and merge, agent proposes | nah rules (requires safety enabled) |
+| Audit trail (punkgo-jack) | Cryptographic receipts for every action | Prove what happened, tune policies over time | punkgo-jack hooks |
+| Network filtering | DNS allowlist for egress | Prevent accidental exfiltration or wrong-env calls | DNS sidecar |
 
 The container is always on. Everything else is a dial you turn up as needed.
+
+**Best practices (recommended but enforced outside crabcage):**
+
+| Practice | What it does | Where to enforce |
+|---|---|---|
+| Credential scoping | Read-only tokens for prod, full for dev | IAM policies, fine-grained PATs, provider-level |
+| Read-only mounts | Mount directories `:ro` that the agent should only read | `.sandbox.yml` mounts config |
+| Branch protection | Require PR reviews, block force push to main | GitHub repo settings |
+
+These are not crabcage-enforced layers — they're recommendations that complement the sandbox. See `docs/credential-scoping.md`.
 
 **Tagline:** An auditable sandbox for agent harnesses.
 
@@ -98,6 +106,24 @@ The `setup:` commands from `.sandbox.yml` (e.g., `uv pip install -e ...`) run at
 
 No Docker socket. No `--privileged`. No host PID/network namespace.
 
+**Resource limits (defaults, configurable):**
+
+```
+--memory=8g                    # prevent runaway memory consumption
+--cpus=4                       # prevent CPU monopolization
+--pids-limit=256               # prevent fork bombs
+```
+
+Configurable via CLI (`--memory 16g`) or config:
+
+```yaml
+resources:
+  memory: 8g
+  cpus: 4
+  timeout: 4h        # auto-stop after 4 hours (0 = no limit)
+  idle_timeout: 30m   # auto-stop after 30 min idle (0 = no limit)
+```
+
 **Users inside the container:**
 
 | User | Purpose |
@@ -116,6 +142,18 @@ No Docker socket. No `--privileged`. No host PID/network namespace.
 Host directories are bind-mounted into the container (read-write by default, `:ro` suffix for read-only). The config volume persists Claude Code state across sessions. Audit volume is inaccessible to the claude user.
 
 **Mount path mapping:** Host paths are mapped predictably into the container. `~/repos` → `/home/claude/repos`, `~/data/fixtures` → `/home/claude/data/fixtures`. Absolute paths outside `$HOME` use explicit mapping (e.g., `/opt/shared:/mnt/shared:ro`). The current working directory is always mounted at `/home/claude/work`.
+
+**Mount path denylist:** The launcher refuses to mount known-sensitive paths without an explicit `--allow-sensitive-mounts` flag:
+
+- `~/.ssh`, `~/.gnupg` — cryptographic keys
+- `~/.aws`, `~/.config/gcloud` — cloud credentials
+- `~/.docker/config.json` — registry credentials
+- `~/` or `/` — overly broad, defeats container isolation
+- `/etc`, `/var/run/docker.sock` — system paths
+
+The launcher also warns (but does not block) when a mount path contains more than 50 subdirectories or known sensitive files (`.env`, `credentials.json`, etc.).
+
+**Audit logging of mounts:** The session's audit receipt records which host paths were mounted and their read-write status, so the mount configuration is part of the verifiable audit trail.
 
 **Services (sidecars, not Docker socket):**
 
@@ -208,6 +246,14 @@ crabcage run
 ```
 
 Mounts current directory, pulls pre-built image, launches Claude Code with `--dangerously-skip-permissions`. No YAML, no config file. The container is the sandbox — your local filesystem is already protected. Safety classification and audit are off by default, ready to dial in.
+
+**Note on `--dangerously-skip-permissions`:** This flag disables Claude Code's built-in permission prompts. Inside crabcage, the container boundary replaces those prompts as the safety mechanism. The launcher contextualizes this in its output:
+
+```
+Starting Claude Code...
+  Claude Code permissions are managed by crabcage's container boundary
+  (and safety layers if enabled), not by Claude Code's built-in prompts.
+```
 
 ### Progressive Opt-In
 
@@ -373,13 +419,15 @@ setup:
   update:
     - bs pull
 
-# Git guardrails
+# Git guardrails (requires safety.enabled: true — enforced via nah rules)
+# The launcher refuses to start if git guardrails are configured but safety is disabled.
 git:
   push: true           # agent can push branches
   create_pr: true      # agent can open PRs
   merge: false         # agent cannot merge (humans do this)
   force_push: block    # never allowed
   delete_branch: ask   # confirm before deleting
+  local_destructive: ask  # git reset --hard, git clean -fd, git checkout . — ask before executing
 
 # Safety layer
 safety:
@@ -449,7 +497,24 @@ Everything else uses defaults. Credentials detected from environment. Current di
 4. CLI flags (`--safety autonomous`)
 5. Environment variables (`CRABCAGE_SAFETY_PRESET=autonomous`)
 
-**Safety-specific constraint:** For `safety` settings, overrides can only **tighten** policy, never relax it. This matches nah's own philosophy for per-project configs. For example, if `.sandbox.yml` sets `preset: supervised`, a CLI flag or env var cannot relax to `minimal` (less restrictive). It can tighten to `autonomous` (more restrictive — blocks more actions). Non-safety settings (image, credentials, repos) follow normal precedence.
+**Safety-specific constraint:** For `safety` settings, overrides can only **tighten** policy, never relax it. This matches nah's own philosophy for per-project configs. For example, if `.sandbox.yml` sets `preset: supervised`, a CLI flag or env var cannot relax to `minimal` (less restrictive). It can tighten to `autonomous` (more restrictive — blocks more actions). Non-safety settings (image, credentials, repos) follow normal precedence. The CLI emits a clear warning when an override is ignored: "Ignoring --safety minimal: .sandbox.yml sets supervised, and safety can only be tightened."
+
+### Config Trust Boundary
+
+**Repo-local `.sandbox.yml` can only set non-executable settings.** This prevents supply-chain attacks where a malicious repo ships a `.sandbox.yml` that runs arbitrary commands at container startup.
+
+| Setting | Repo-local `.sandbox.yml` | User global config | CLI flags |
+|---|---|---|---|
+| `safety`, `git`, `audit` | Yes | Yes | Yes |
+| `network` | Yes (can only tighten) | Yes | Yes |
+| `mounts` | **No** | Yes | Yes |
+| `setup` | **No** | Yes | Yes |
+| `credentials` | **No** | Yes | Yes |
+| `services` | **No** | Yes | Yes |
+
+If a repo-local config attempts to set restricted fields, the launcher warns: "Ignoring setup commands from .sandbox.yml — setup can only be configured in ~/.config/crabcage/config.yml or via CLI." This is printed before any commands execute.
+
+On first use of a repo-local `.sandbox.yml`, the launcher displays the settings it will apply and requires confirmation.
 
 ## Safety Presets
 
@@ -472,6 +537,7 @@ Human watching. Claude works freely on safe operations, asks before anything imp
 | git_safe (status, diff, log, branch, checkout) | allow |
 | git_remote_write (push, PR creation) | ask |
 | git_history_rewrite (force push, rebase) | block |
+| git_local_destructive (reset --hard, clean -fd, checkout .) | ask |
 | package_run (npm run, pytest, uv run) | allow |
 | network_outbound | context (nah decides per-target) |
 | process_signal (kill) | ask |
@@ -491,6 +557,7 @@ Fire-and-forget. Destructive local operations are blocked. Remote writes (push b
 | git_safe | allow |
 | git_remote_write | allow (push branches + create PRs — not merge) |
 | git_history_rewrite | block |
+| git_local_destructive | block |
 | package_run | allow |
 | network_outbound | allowlist only |
 | process_signal | block |
@@ -773,8 +840,9 @@ ln -s /home/claude/repos/boxshop-config/claude/config/rules/* ~/.claude/rules/
 - `.sandbox.yml` is **not mounted** into the container — the launcher reads it on the host and generates runtime config
 - `~/.config/nah/config.yaml` is owned by root, readable by claude, not writable
 - `punkgo-jack` config and signing key are owned by audit user, inaccessible to claude
-- Claude Code `settings.json` hook registrations are root-owned and not writable
-- The `git:` guardrails are enforced via nah rules generated at startup, not editable at runtime
+- Claude Code `settings.json` and hook registration files are **mounted as individual read-only bind mounts** from the host, not writable from within the container. The rest of `/home/claude/.claude` (session history, conversation cache) remains writable on the config volume.
+- The `git:` guardrails are enforced via nah rules generated at startup, not editable at runtime. The launcher refuses to start if git guardrails are configured but `safety.enabled` is false.
+- nah hooks are invoked by Claude Code via absolute paths, not PATH-resolved names, so PATH shadowing cannot bypass them.
 
 To change how crabcage runs, edit the config **on the host** and restart the sandbox. The agent inside the cage cannot modify the cage.
 
@@ -800,11 +868,15 @@ The Merkle tree makes post-hoc tampering detectable. However, if the daemon cras
 
 **Credential exposure:**
 
-All injected credentials are visible as env vars inside the container. Mitigations:
-- `nah` blocks `env`/`printenv`/`set` commands
-- Credentials should be scoped (fine-grained PATs, narrow IAM policies)
-- AWS session tokens are short-lived
-- The container cannot access host credential files (they're injected, not mounted)
+All injected credentials are visible as env vars inside the container. **Nah's blocking of `env`/`printenv`/`set` is a UX guardrail — it prevents accidental display of credentials in conversation output. It is not a security control.** The agent can still access credentials via `/proc/self/environ`, `os.environ` (Python), `process.env` (Node), or any other programmatic method. Nah cannot intercept these.
+
+The real protection for credentials is **scoping at the provider level:**
+- Fine-grained GitHub PATs scoped to specific repos with minimal permissions
+- AWS IAM roles with narrow policies (read-only for prod)
+- Short-lived session tokens (AWS SSO tokens expire)
+- Cloudflare API tokens scoped to specific zones
+
+If a credential leaks, the blast radius is bounded by its scope, not by anything crabcage enforces. A future enhancement (Phase 2+) may introduce credential helpers that return tokens on demand instead of storing them in env vars, removing them from `/proc/self/environ` and accidental `env` dumps.
 
 **Bind-mounted directories are the weakest link:**
 
