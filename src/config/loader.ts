@@ -74,8 +74,8 @@ export function loadConfig(options: {
   // Layer 1: Built-in defaults (applied last via applyDefaults)
   let merged: Record<string, unknown> = {};
 
-  // Layer 2: Repo-local .sandbox.yml (trust-restricted)
-  const repoConfigPath = join(cwd, ".sandbox.yml");
+  // Layer 2: Repo-local .crabcage.yml (trust-restricted)
+  const repoConfigPath = join(cwd, ".crabcage.yml");
   const repoRaw = readYamlFile(repoConfigPath);
   if (repoRaw) {
     const stripped = enforceRepoBoundary(repoRaw);

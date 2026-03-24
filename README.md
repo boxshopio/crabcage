@@ -43,12 +43,12 @@ crabcage run --safety supervised
 crabcage run --safety supervised --audit
 
 # Use a config file for team standardization
-crabcage run --config .sandbox.yml
+crabcage run --config .crabcage.yml
 ```
 
 ## Config file
 
-For teams, check a `.sandbox.yml` into your repo:
+For teams, check a `.crabcage.yml` into your repo:
 
 ```yaml
 mounts:

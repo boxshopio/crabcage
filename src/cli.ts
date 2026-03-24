@@ -17,7 +17,7 @@ program
 program
   .command("run")
   .description("Launch a sandbox for your AI agent")
-  .option("-c, --config <path>", "Path to .sandbox.yml config file")
+  .option("-c, --config <path>", "Path to .crabcage.yml config file")
   .option("-s, --safety <preset>", "Safety preset: supervised, autonomous, minimal")
   .option("-a, --audit", "Enable cryptographic audit trail")
   .option("-d, --detach", "Run in background (detached mode)")

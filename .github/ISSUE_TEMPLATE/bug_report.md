@@ -21,5 +21,5 @@ labels: bug
 
 **Config (if relevant):**
 ```yaml
-# paste your .sandbox.yml here (remove any secrets)
+# paste your .crabcage.yml here (remove any secrets)
 ```
