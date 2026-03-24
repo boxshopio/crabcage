@@ -6,9 +6,27 @@
 
 ## Overview
 
-Crabcage is an auditable sandbox for agent harnesses. Run your AI coding agent in a container so `--dangerously-skip-permissions` isn't actually dangerous — your local filesystem, credentials, and production systems are isolated by default. Then dial in additional protections as needed: safety classification to catch accidental destructive commands, cryptographic audit to prove what happened, network filtering to control egress.
+Crabcage is an auditable sandbox for agent harnesses. Run your AI coding agent in a container so your local filesystem, credentials, and shell history are isolated by default. Then dial in additional protections as needed.
 
-**Tagline:** An auditable sandbox for agent harnesses. Dial in protections, or run dangerously without the danger.
+**What the container protects:** Your local machine. Your filesystem, credentials, shell history, and other repos are isolated. Even with `--dangerously-skip-permissions`, the agent can't damage your laptop.
+
+**What the container does NOT protect:** External systems. If you give the agent credentials that can push to GitHub, deploy to AWS, or modify DNS, the agent can use them. The container doesn't know the difference between a good push and a bad one.
+
+**That's what the other layers are for.** Each one addresses a different category of risk:
+
+| Protection Layer | What it does | Why |
+|---|---|---|
+| Container isolation | Filesystem separation from host | Agent can't touch your real files |
+| Command approval (nah) | Classifies commands as allow/ask/block | Catch destructive commands before they run |
+| Git guardrails | Control push/PR/merge/force-push independently | Humans review and merge, agent proposes |
+| Credential scoping | Read-only for prod, full for dev | Agent can investigate prod but can't break it |
+| Data locality | Repos are clones, not mounts | Agent works on a copy, originals untouched |
+| Audit trail (punkgo-jack) | Cryptographic receipts for every action | Prove what happened, tune policies over time |
+| Network filtering | DNS allowlist for egress | Prevent accidental exfiltration or wrong-env calls |
+
+The container is always on. Everything else is a dial you turn up as needed.
+
+**Tagline:** An auditable sandbox for agent harnesses.
 
 **What it is NOT:** An orchestration platform, a Kubernetes control plane, or a devcontainer for human development.
 
@@ -149,21 +167,23 @@ The `help` field from the config provides the actionable fix message. The launch
 
 ## Implementation
 
-**Language:** Python 3.13+, managed with `uv`. The CLI is a Python package using `click` for command parsing and `rich` for terminal output — consistent with the boxshop toolchain (`km`, `bs`, `kl` all use this stack).
+**Language:** TypeScript/Node.js. The CLI is an npm package.
 
-**Why Python, not Rust/Go/shell:**
-- The team already maintains three Python CLIs with this exact stack
-- The CLI is thin orchestration (Docker commands, file generation, credential checks) — no performance-critical paths
-- `uv` makes distribution easy (`pip install`, `uvx`, or `brew` via a formula)
-- The container image and its contents do the heavy lifting, not the CLI
+**Why Node, not Python/Rust/Go:**
+- Everyone running Claude Code already has Node installed — it's a prerequisite
+- `npx crabcage run` enables zero-install first runs (no global install needed)
+- `npm install -g crabcage` for permanence
+- Brew formula available for macOS users who prefer it
+- The CLI is thin orchestration (Docker commands, YAML parsing, credential checks) — no performance-critical paths
+- Internal tools (`km`, `bs`, `kl`) remain Python; this is an OSS tool with different distribution constraints
 
-**Package name:** `crabcage` on PyPI. Entry point: `crabcage` CLI command.
+**Package name:** `crabcage` on npm. Entry point: `crabcage` CLI command.
 
 **Dependencies (minimal):**
-- `click` — CLI framework
-- `rich` — terminal output, progress, tables
-- `pyyaml` — config file parsing
-- `jsonschema` — config validation
+- `commander` or `yargs` — CLI framework
+- `yaml` — config file parsing
+- `ajv` — JSON schema validation
+- `chalk` or `picocolors` — terminal output
 
 The CLI does NOT run inside the container. It runs on the host and orchestrates Docker.
 
@@ -172,8 +192,9 @@ The CLI does NOT run inside the container. It runs on the host and orchestrates 
 ### Installation
 
 ```bash
-pip install crabcage      # primary (via pip/uv/uvx)
-brew install crabcage     # macOS (via Homebrew formula)
+npx crabcage run          # zero-install, try it immediately
+npm install -g crabcage   # permanent install
+brew install crabcage     # macOS via Homebrew
 ```
 
 ### Zero-Config First Run
@@ -211,23 +232,87 @@ crabcage update            # pull latest image
 crabcage clean             # prune stopped sandboxes and orphan volumes
 ```
 
-### Interactive Scaffolder
+### Interactive Setup
+
+`crabcage init` walks through each protection layer with reasoning. It's educational — users understand what they're configuring and why. Can be re-run to update an existing config.
 
 ```
 $ crabcage init
 
-What agent will you use? [claude/codex/gemini]: claude
-Which credentials do you need?
-  ✓ ANTHROPIC_API_KEY (required)
-  ? GH_TOKEN [y/N]: y
+Crabcage protects your system in layers. Let's configure each one.
+
+── Container Isolation (always on) ──────────────────────
+Your agent runs in a container. Your local filesystem, credentials,
+and shell history are isolated. This alone protects your machine —
+but not external systems the agent has credentials for.
+
+── Command Approval ─────────────────────────────────────
+Catch destructive commands before they run. Uses 'nah' to classify
+commands as allow/ask/block based on context, not just pattern matching.
+
+Enable command approval? [y/N]: y
+
+  How strict?
+  a) supervised — asks before git push, deletes, production commands
+  b) autonomous — blocks all destructive ops, allows pushes + PRs
+  c) minimal    — only catches force-push and obfuscated commands
+  d) custom     — configure each action type individually
+
+  Choice [a]: a
+
+── Git Guardrails ───────────────────────────────────────
+How should the agent interact with git remotes?
+
+  a) Push branches + create PRs (recommended — humans review and merge)
+  b) Push branches + create PRs + merge (agent handles full workflow)
+  c) Read-only (agent can commit locally but not push)
+
+  Choice [a]: a
+
+── Credential Scoping ───────────────────────────────────
+Do you have production systems the agent should NOT write to?
+
+  [y/N]: y
+
+  Recommended: use read-only credentials for production. This is
+  enforced at the provider level (IAM policies, read-only API tokens),
+  not inside the sandbox. See: docs/credential-scoping.md
+
+── Audit Trail ──────────────────────────────────────────
+Want cryptographic proof of what the agent did? Uses tamper-evident
+Merkle tree receipts that can be verified offline.
+
+Enable audit trail? [y/N]: y
+
+── Network Filtering ────────────────────────────────────
+Restrict which domains the agent can reach. Prevents accidental
+calls to wrong environments and naive data exfiltration.
+
+Enable network filtering? [y/N]: n
+
+── Credentials ──────────────────────────────────────────
+Which credentials does your agent need?
+
+  ✓ Claude auth (required)
+  ? GitHub token [y/N]: y
   ? AWS credentials [y/N]: y
-  ? Cloudflare API token [y/N]: n
-Enable safety classification (nah)? [Y/n]: y
-  Safety preset? [supervised/autonomous/minimal]: supervised
-Enable cryptographic audit? [y/N]: y
-Repo provisioning command (optional): bs pull
+  ? Other (name):
+
+── Repo Provisioning ────────────────────────────────────
+Command to clone/update your repos inside the container (optional):
+> bs pull
+
+── Summary ──────────────────────────────────────────────
+
+  Container isolation    ✓ always on
+  Command approval       ✓ supervised (nah)
+  Git guardrails         ✓ push + PR only (no merge)
+  Credential scoping     ⚠ recommended (see docs)
+  Audit trail            ✓ enabled (punkgo-jack)
+  Network filtering      ✗ off
 
 Wrote .sandbox.yml
+Run 'crabcage run' to start your sandbox.
 ```
 
 ## Config File
@@ -268,6 +353,14 @@ repos:
 tools:
   - uv pip install -e /home/claude/repos/kingmaker
   - uv pip install -e /home/claude/repos/boxshop-cli
+
+# Git guardrails
+git:
+  push: true           # agent can push branches
+  create_pr: true      # agent can open PRs
+  merge: false         # agent cannot merge (humans do this)
+  force_push: block    # never allowed
+  delete_branch: ask   # confirm before deleting
 
 # Safety layer
 safety:
@@ -651,6 +744,18 @@ ln -s /home/claude/repos/boxshop-config/claude/config/rules/* ~/.claude/rules/
 ```
 
 ## Security Considerations
+
+### Config Immutability
+
+**The agent cannot modify how it runs.** All safety configuration is immutable from inside the container:
+
+- `.sandbox.yml` is **not mounted** into the container — the launcher reads it on the host and generates runtime config
+- `~/.config/nah/config.yaml` is owned by root, readable by claude, not writable
+- `punkgo-jack` config and signing key are owned by audit user, inaccessible to claude
+- Claude Code `settings.json` hook registrations are root-owned and not writable
+- The `git:` guardrails are enforced via nah rules generated at startup, not editable at runtime
+
+To change how crabcage runs, edit the config **on the host** and restart the sandbox. The agent inside the cage cannot modify the cage.
 
 ### Known Limitations
 
