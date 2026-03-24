@@ -845,11 +845,35 @@ Requires:
 - Session lifecycle management (auto-shutdown after idle)
 - Cost controls (Fargate spot, auto-stop)
 
-### Phase 4: Multi-Agent Support
+### Phase 4: MCP Server Integration
+
+MCP servers run outside the container (on the host or via Docker Desktop MCP). The sandbox connects to them over the network. This fits the safety model — MCP servers have their own credentials and host access that shouldn't live inside the cage.
+
+**Open design questions:**
+
+- **Proxy layer:** A crabcage-managed proxy between the sandbox and host MCP servers could: remap servers to sensible hostnames (e.g., `github.mcp.local` instead of `host.docker.internal:3000`), enforce access policies (which MCP tools the agent can call), and log MCP traffic for audit coverage.
+- **Discovery:** A discoverable MCP server list so the sandbox auto-detects available servers rather than requiring manual config. Investigate whether an off-the-shelf MCP registry/discovery protocol exists before building one.
+- **Config injection:** The proxy or launcher generates Claude Code's `mcpServers` config pointing at the forwarded/proxied endpoints. The agent sees clean hostnames, never raw host ports.
+
+**Possible config shape:**
+
+```yaml
+mcp:
+  forward:
+    - name: github
+      host_url: host.docker.internal:3000
+      alias: github.mcp.local
+    - name: playwright
+      host_url: host.docker.internal:3001
+      alias: playwright.mcp.local
+  discover: true  # auto-detect available MCP servers
+```
+
+### Phase 5: Multi-Agent Support
 
 Extend config to support Codex and Gemini CLI. Container architecture unchanged — just the agent binary and auth flow.
 
-### Phase 5: Image Optimization
+### Phase 6: Image Optimization
 
 Multi-stage build producing a lighter runtime image. Alpine is possible but historically problematic with Python native extensions (musl vs glibc). Distroless is likely impractical given the heavy toolchain (Node.js, Python, uv, git, gh, aws-cli, ripgrep, fzf, tmux). Realistically, the gain here is trimming unnecessary packages from the slim image, not a base image switch. Only worth pursuing once toolchain is proven stable.
 
