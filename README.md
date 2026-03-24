@@ -1,29 +1,49 @@
 # crabcage
 
-An auditable sandbox for agent harnesses. Dial in protections, or run dangerously without the danger.
+```
+            o  O  o
+      ┌─────────────────┐
+      │   /V\     /V\   │  O
+      │    \\(o_o)//    │
+      │      (___)      │   o
+      │    __|   |__    │
+      └─────────────────┘
+        ~ ~ ~ ~ ~ ~ ~ ~ ~
+```
 
-> Your AI agent gets a crabby patty — a nice, contained environment where it can work freely without touching your actual files, credentials, or production systems.
+An auditable sandbox for agent harnesses.
 
-## What it does
+Protect your computer files and production systems from irreparable damage. Dial in additional protections as desired, or run dangerously without too much concern for local filesystem damage.
 
-Crabcage runs your AI coding agent (Claude Code, etc.) inside a Docker container. Your local filesystem is isolated by default. Then you dial in additional protections as needed:
+> The secret formula: put your agent in a cage, not on a patty.
+
+## The problem
+
+You want to run an AI coding agent with `--dangerously-skip-permissions` so it can actually get work done. But you also want to protect your computer files, your credentials, and your production systems from accidental damage.
+
+The container protects your local machine — filesystem, credentials, shell history are all isolated. But the container alone doesn't make things safe if the agent has access to external systems. If you hand it a GitHub token and an AWS admin role, it can use them. That's what the other layers are for.
+
+## Layered protections
+
+Each layer addresses a different category of risk. The container is always on. Everything else is a dial you turn up as needed.
 
 | Protection | What it does | Default |
 |---|---|---|
 | **Container isolation** | Agent can't touch unmounted files | Always on |
-| **Command approval** | Catch destructive commands before they run | Off (opt-in via `--safety`) |
-| **Git guardrails** | Control push/PR/merge/force-push | Configurable |
-| **Audit trail** | Cryptographic receipts for every action | Off (opt-in via `--audit`) |
-| **Network filtering** | DNS allowlist for egress | Off (opt-in via config) |
+| **Command approval** | Configurable via [nah](https://github.com/manuelschipper/nah) — if dangerous mode is too much | Off (`--safety`) |
+| **Git guardrails** | Control push/PR/merge/force-push independently | Configurable |
+| **Audit trail** | All actions auditable, analyzable later to improve the system | Off (`--audit`) |
+| **Network filtering** | DNS allowlist for egress | Off (via config) |
 
-**What the container protects:** Your local machine. Filesystem, credentials, shell history — all isolated.
-
-**What it does NOT protect:** External systems. If you give the agent credentials that can push to GitHub or deploy to AWS, the agent can use them. That's what the other layers are for.
+**Best practices** (recommended, enforced outside crabcage):
+- Read-only credentials for production APIs
+- Fine-grained tokens scoped to what the agent actually needs
+- GitHub branch protection rules (humans merge, agent proposes)
 
 ## Quick start
 
 ```bash
-# Try it (zero install)
+# Try it — zero install
 npx crabcage run
 
 # Or install globally
@@ -33,10 +53,10 @@ crabcage run
 
 That's it. Mounts your current directory, launches Claude Code in a hardened container. No config file needed.
 
-## Dial in protections
+## Dial it in
 
 ```bash
-# Add safety classification (catches destructive commands)
+# Add safety classification (catches destructive commands before they run)
 crabcage run --safety supervised
 
 # Add cryptographic audit trail
@@ -48,7 +68,7 @@ crabcage run --config .crabcage.yml
 
 ## Config file
 
-For teams, check a `.crabcage.yml` into your repo:
+For teams, check a `.crabcage.yml` into your repo so everyone gets the same sandbox:
 
 ```yaml
 mounts:
@@ -62,7 +82,7 @@ credentials:
 git:
   push: true
   create_pr: true
-  merge: false
+  merge: false       # humans review and merge, agent proposes
   force_push: block
 
 safety:
@@ -73,7 +93,7 @@ audit:
   enabled: true
 ```
 
-Generate one interactively:
+Or walk through an interactive setup to configure your crabcage to your specifications:
 
 ```bash
 crabcage init
@@ -103,12 +123,12 @@ crabcage clean             # remove stopped sandboxes
 
 ## How it works
 
-1. **CLI reads your config** (or uses defaults)
-2. **Validates credentials** on the host before starting (fail-fast)
-3. **Checks mount paths** against a denylist (`~/.ssh`, `~/.aws`, `/` are blocked)
-4. **Generates a docker-compose** with hardened defaults (`--cap-drop=ALL`, `--read-only`, resource limits)
-5. **Launches the container** with Claude Code in `--dangerously-skip-permissions` mode (the container IS the sandbox)
-6. **Optional layers** (nah for safety, punkgo-jack for audit) hook into Claude Code's tool execution
+1. Reads your config (or uses sensible defaults)
+2. Validates credentials on the host before starting — fails fast with actionable errors
+3. Checks mount paths against a denylist (`~/.ssh`, `~/.aws`, `/` are blocked)
+4. Generates a docker-compose with hardened defaults
+5. Launches the container with `--dangerously-skip-permissions` (the container IS the sandbox)
+6. Optional layers ([nah](https://github.com/manuelschipper/nah) for safety, [punkgo-jack](https://github.com/PunkGo/punkgo-jack) for audit) hook into the agent's tool execution
 
 ## Container hardening
 
@@ -121,6 +141,7 @@ Applied by default — no configuration needed:
 - No Docker socket access
 - No host PID/network namespace
 - Isolated bridge network
+- Mount path denylist (refuses `~/.ssh`, `~/.aws`, `~/`, `/`)
 
 ## Contributing
 
