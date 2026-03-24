@@ -44,7 +44,7 @@ Each layer adds value independently. Users opt in progressively:
 
 ### Container Architecture
 
-**Base image:** Multi-stage build, published to GHCR as `ghcr.io/boxshopio/crabcage:latest` (amd64 + arm64).
+**Base image:** Multi-stage build, published to GHCR as `ghcr.io/boxshopio/crabcage:latest` (amd64 + arm64). End users always pull the pre-built image — the Dockerfile details below are for maintainers publishing the image.
 
 ```
 Stage 1 (builder): debian:bookworm
@@ -55,8 +55,8 @@ Stage 2 (runtime): debian:bookworm-slim
   - Node.js 22, Python 3.13+, uv, git, gh, aws-cli v2
   - jq, ripgrep, fzf, tmux
   - Claude Code (npm install -g @anthropic-ai/claude-code)
-  - nah binary (copied from builder or pip install)
-  - punkgo-jack binary (copied from builder)
+  - nah (pip install in runtime stage — Python package, no compilation needed)
+  - punkgo-jack binary (compiled in builder, copied to runtime)
 ```
 
 **Container hardening (defaults):**
@@ -76,7 +76,7 @@ No Docker socket. No `--privileged`. No host PID/network namespace.
 | User | Purpose |
 |---|---|
 | `claude` (UID configurable) | Runs Claude Code, owns repo workspace |
-| `audit` | Runs punkgo-jack daemon, owns audit logs and signing key. Claude user cannot signal or read audit user's files. |
+| `audit` | Runs punkgo-jack daemon, owns audit logs and signing key. Claude user cannot signal audit's processes (standard Unix: non-root users cannot signal other users' processes) or read audit-owned files (directory permissions 0700). Combined with `--security-opt=no-new-privileges`, the claude user cannot escalate to audit. |
 
 **Volumes:**
 
@@ -122,26 +122,47 @@ The launcher auto-detects which is available. If both exist, API key takes prece
 - `CF_API_TOKEN` — Cloudflare (optional)
 - Custom credentials declared in config
 
-**Fail-fast validation:** Every credential is checked before the container starts. Each failure prints a specific, actionable error:
+**Fail-fast validation:** Every credential is checked before the container starts using the `check` command from the config (or built-in defaults). Validation is **exit-code based** — a zero exit code means valid, non-zero means invalid. The status line shows the credential name and pass/fail:
 
 ```
 Checking credentials...
-  ✓ Claude auth       subscription (OAuth token valid)
-  ✓ GH_TOKEN          valid (scope: repo, org:read)
-  ✗ AWS session        expired
+  ✓ Claude auth       valid (OAuth)
+  ✓ GH_TOKEN          valid
+  ✗ AWS session        check failed
     → Run: aws sso login --sso-session boxshop
 
 Aborting. Fix the above and retry.
 ```
+
+The `help` field from the config provides the actionable fix message. The launcher does not parse command output for scope or token details — it only checks whether the credential is present and the check command succeeds.
+
+## Implementation
+
+**Language:** Python 3.13+, managed with `uv`. The CLI is a Python package using `click` for command parsing and `rich` for terminal output — consistent with the boxshop toolchain (`km`, `bs`, `kl` all use this stack).
+
+**Why Python, not Rust/Go/shell:**
+- The team already maintains three Python CLIs with this exact stack
+- The CLI is thin orchestration (Docker commands, file generation, credential checks) — no performance-critical paths
+- `uv` makes distribution easy (`pip install`, `uvx`, or `brew` via a formula)
+- The container image and its contents do the heavy lifting, not the CLI
+
+**Package name:** `crabcage` on PyPI. Entry point: `crabcage` CLI command.
+
+**Dependencies (minimal):**
+- `click` — CLI framework
+- `rich` — terminal output, progress, tables
+- `pyyaml` — config file parsing
+- `jsonschema` — config validation
+
+The CLI does NOT run inside the container. It runs on the host and orchestrates Docker.
 
 ## CLI
 
 ### Installation
 
 ```bash
-brew install crabcage     # macOS
-pip install crabcage      # or via pip/uv
-npm install -g crabcage   # or via npm
+pip install crabcage      # primary (via pip/uv/uvx)
+brew install crabcage     # macOS (via Homebrew formula)
 ```
 
 ### Zero-Config First Run
@@ -173,6 +194,7 @@ crabcage shell             # attach to running sandbox
 crabcage audit list        # list session receipts
 crabcage audit verify <id> # verify a receipt's integrity
 crabcage audit show <id>   # full event log
+crabcage audit recover     # export latest checkpoint from incomplete sessions
 crabcage status            # show running sandboxes, volumes, image version
 crabcage update            # pull latest image
 crabcage clean             # prune stopped sandboxes and orphan volumes
@@ -223,7 +245,9 @@ credentials:
   - name: CF_API_TOKEN
     required: false
 
-# Repo provisioning (runs on first launch, update on subsequent)
+# Repo provisioning
+# init: runs when the repos volume is empty (detected via marker file .crabcage-initialized)
+# update: runs on subsequent launches when the marker file exists
 repos:
   init: bs pull
   update: bs pull
@@ -302,9 +326,15 @@ Everything else uses defaults. Credentials detected from environment. Current di
 4. CLI flags (`--safety autonomous`)
 5. Environment variables (`CRABCAGE_SAFETY_PRESET=autonomous`)
 
+**Safety-specific constraint:** For `safety` settings, overrides can only **tighten** policy, never relax it. This matches nah's own philosophy for per-project configs. For example, if `.sandbox.yml` sets `preset: supervised`, an env var cannot downgrade to `minimal`. It can upgrade to `autonomous` (stricter). Non-safety settings (image, credentials, repos) follow normal precedence.
+
 ## Safety Presets
 
-Three built-in presets, each a complete `nah` policy configuration.
+Three built-in presets defined by crabcage, each generating a complete `nah` config file (`~/.config/nah/config.yaml`). These are **crabcage concepts, not native nah presets** — nah's own profiles are `full`, `minimal`, and `none`. Crabcage maps its presets to nah action type overrides and custom classification rules at container startup.
+
+The `env/printenv/set` blocking is a **crabcage-added classification rule**, not a built-in nah action type. Crabcage generates nah `classify` entries that map these commands to a `credential_exposure` action type with the configured policy.
+
+The nah config is generated by the container entrypoint before Claude Code starts, based on the active preset + any overrides from `.sandbox.yml`. The generated config is written to `~/.config/nah/config.yaml` (owned by root, readable by claude, not writable).
 
 ### `supervised` (default)
 
@@ -327,7 +357,7 @@ Human watching. Claude works freely on safe operations, asks before anything imp
 
 ### `autonomous`
 
-Fire-and-forget. Nothing destructive is possible.
+Fire-and-forget. Destructive local operations are blocked. Remote writes (push branches, create PRs) are allowed because they are reversible (branch deletion, PR closure) and reviewable — the blast radius is bounded by GitHub branch protection rules, which operate outside the container.
 
 | Action Type | Policy |
 |---|---|
@@ -346,13 +376,21 @@ Fire-and-forget. Nothing destructive is possible.
 
 ### `minimal`
 
-Just isolation. Almost everything allowed.
+Just isolation. Almost everything allowed. All action types default to `allow` except:
 
 | Action Type | Policy |
 |---|---|
-| Everything | allow |
+| filesystem_read | allow |
+| filesystem_write | allow |
+| filesystem_delete | allow |
+| git_safe | allow |
+| git_remote_write | allow |
 | git_history_rewrite | ask |
+| package_run | allow |
+| network_outbound | allow |
+| process_signal | allow |
 | obfuscated | ask |
+| credential_exposure (env/printenv/set) | allow |
 
 ### Per-Project Tightening
 
@@ -391,11 +429,15 @@ Two users, two volumes, no cross-access. Claude cannot read, write, or kill the 
 ### Event Capture Chain
 
 1. Claude Code invokes a tool (Bash, Read, Write, Edit, etc.)
-2. `nah` PreToolUse hook fires — classifies — allow/ask/block
-3. `punkgo-jack` PreToolUse hook fires — records the attempt + nah's classification
+2. `nah` PreToolUse hook fires — classifies — allow/ask/block — writes decision to a shared JSONL file (`/tmp/nah-decisions.jsonl`) containing the tool name, classification, and reasoning
+3. `punkgo-jack` PreToolUse hook fires — reads the latest nah decision from the shared file, records the attempt + nah's classification into the Merkle tree
 4. Tool executes (or doesn't)
-5. `punkgo-jack` PostToolUse hook fires — records the outcome
+5. `punkgo-jack` PostToolUse hook fires — records the outcome (success/failure/blocked)
 6. Every 5 minutes, punkgo-jack anchors a checkpoint via RFC 3161 TSA (DigiCert)
+
+**Inter-hook communication:** Claude Code hooks fire independently — there is no built-in pipeline between hooks. The nah→punkgo-jack data flow uses a shared file (`/tmp/nah-decisions.jsonl`) as the coordination mechanism. nah appends a decision line; punkgo-jack reads the latest line matching the current tool invocation. The file lives on tmpfs and is ephemeral. If nah fails to write (or is disabled), punkgo-jack records the event without classification data — the audit chain is never broken by a safety layer failure.
+
+**MCP tool coverage:** Claude Code's hook system fires PreToolUse/PostToolUse for MCP tool calls, but this must be verified empirically during implementation. If MCP calls bypass the hook chain, crabcage will add a network-level audit fallback: logging outbound HTTP requests from the container via the DNS sidecar or a transparent proxy. This is a **v1 implementation task** — the spec assumes hooks cover MCP, with a documented fallback if they don't.
 
 Blocked and asked actions are also recorded — the audit captures what Claude *attempted*, not just what executed.
 
@@ -425,12 +467,16 @@ Blocked and asked actions are also recorded — the audit captures what Claude *
 
 ### Receipt Export
 
-On container exit:
+**During the session:** Punkgo-jack periodically writes checkpoint receipts to `/var/audit/receipts/` (every TSA anchor, ~5 min). This ensures partial audit data survives container crashes, OOM kills, or host failures.
 
-1. Shutdown hook triggers `punkgo-jack export`
-2. Receipt written to `/var/audit/receipts/<session-id>.json`
+**On clean container exit:**
+
+1. Shutdown hook triggers `punkgo-jack export --final`
+2. Final receipt written to `/var/audit/receipts/<session-id>.json`
 3. Receipt copied to host at configured `export_path` (default: `~/.crabcage/audit/`)
-4. Receipt contains: session summary, event count, Merkle root, inclusion proofs, TSA tokens
+4. Receipt contains: session summary, event count, Merkle root, all inclusion proofs, TSA tokens
+
+**On unclean exit (kill, OOM, crash):** The last checkpoint receipt in the audit volume is the recovery point. `crabcage audit list` detects incomplete sessions and flags them. `crabcage audit recover` exports the latest checkpoint from the volume.
 
 ### Verification
 
@@ -689,7 +735,7 @@ Extend config to support Codex and Gemini CLI. Container architecture unchanged 
 
 ### Phase 5: Image Optimization
 
-Multi-stage build producing Alpine or distroless runtime image. Only worth doing once toolchain is proven stable on Debian slim.
+Multi-stage build producing a lighter runtime image. Alpine is possible but historically problematic with Python native extensions (musl vs glibc). Distroless is likely impractical given the heavy toolchain (Node.js, Python, uv, git, gh, aws-cli, ripgrep, fzf, tmux). Realistically, the gain here is trimming unnecessary packages from the slim image, not a base image switch. Only worth pursuing once toolchain is proven stable.
 
 ## Competitive Positioning
 
@@ -730,3 +776,7 @@ Multi-stage build producing Alpine or distroless runtime image. Only worth doing
 - [claude-container](https://github.com/nicwolff/claude-container)
 - [Anthropic sandbox engineering blog](https://www.anthropic.com/engineering/claude-code-sandboxing)
 - [Ona: How Claude Code escapes its sandbox](https://ona.com/stories/how-claude-code-escapes-its-own-denylist-and-sandbox)
+- [ClodPod — macOS VMs for AI agents](https://github.com/webcoyote/clodpod)
+- [Gluon Agent — Multi-agent orchestration](https://github.com/carrotly-ai/gluon-agent)
+- [Spritz — K8s-native agent control plane](https://github.com/textcortex/spritz)
+- [Deva — Docker launcher for AI CLIs](https://github.com/thevibeworks/deva)
