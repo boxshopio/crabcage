@@ -29,7 +29,7 @@ The container is always on. Everything else is a dial you turn up as needed.
 | Practice | What it does | Where to enforce |
 |---|---|---|
 | Credential scoping | Read-only tokens for prod, full for dev | IAM policies, fine-grained PATs, provider-level |
-| Read-only mounts | Mount directories `:ro` that the agent should only read | `.sandbox.yml` mounts config |
+| Read-only mounts | Mount directories `:ro` that the agent should only read | `.crabcage.yml` mounts config |
 | Branch protection | Require PR reviews, block force push to main | GitHub repo settings |
 
 These are not crabcage-enforced layers — they're recommendations that complement the sandbox. See `docs/credential-scoping.md`.
@@ -102,7 +102,7 @@ Stage 2 (runtime): debian:bookworm-slim
 - `/var/audit` — audit volume (persistent, audit user only)
 - `/tmp`, `/var/tmp` — tmpfs (scratch space, ephemeral)
 
-The `setup:` commands from `.sandbox.yml` (e.g., `uv pip install -e ...`) run at container startup **before** Claude Code starts. They install to `/home/claude/.local` (Python user-site), which is a tmpfs mount. This means custom tools are re-installed on each container launch — acceptable since `uv pip install` is fast and the source code is in the bind-mounted directory.
+The `setup:` commands from `.crabcage.yml` (e.g., `uv pip install -e ...`) run at container startup **before** Claude Code starts. They install to `/home/claude/.local` (Python user-site), which is a tmpfs mount. This means custom tools are re-installed on each container launch — acceptable since `uv pip install` is fast and the source code is in the bind-mounted directory.
 
 No Docker socket. No `--privileged`. No host PID/network namespace.
 
@@ -260,13 +260,13 @@ Starting Claude Code...
 ```bash
 crabcage run --safety supervised          # adds nah
 crabcage run --safety supervised --audit  # adds nah + punkgo-jack
-crabcage run --config .sandbox.yml        # full team config
+crabcage run --config .crabcage.yml        # full team config
 ```
 
 ### Commands
 
 ```bash
-crabcage init              # scaffold a .sandbox.yml interactively
+crabcage init              # scaffold a .crabcage.yml interactively
 crabcage run               # launch sandbox (pull image if needed)
 crabcage run -d            # detached/background mode
 crabcage stop              # stop running sandbox
@@ -371,7 +371,7 @@ Commands to run inside the container on first launch (optional):
   Audit trail            ✓ enabled (punkgo-jack)
   Network filtering      ✗ off
 
-Wrote .sandbox.yml
+Wrote .crabcage.yml
 Run 'crabcage run' to start your sandbox.
 ```
 
@@ -382,7 +382,7 @@ Declarative YAML checked into the repo for team standardization. JSON schema pub
 ### Full Example
 
 ```yaml
-# .sandbox.yml
+# .crabcage.yml
 
 # Agent configuration
 agent: claude  # claude | codex | gemini (future)
@@ -492,18 +492,18 @@ Everything else uses defaults. Credentials detected from environment. Current di
 ### Override Precedence (lowest to highest)
 
 1. Built-in defaults
-2. `.sandbox.yml` in project directory
+2. `.crabcage.yml` in project directory
 3. `~/.config/crabcage/config.yml` (user global)
 4. CLI flags (`--safety autonomous`)
 5. Environment variables (`CRABCAGE_SAFETY_PRESET=autonomous`)
 
-**Safety-specific constraint:** For `safety` settings, overrides can only **tighten** policy, never relax it. This matches nah's own philosophy for per-project configs. For example, if `.sandbox.yml` sets `preset: supervised`, a CLI flag or env var cannot relax to `minimal` (less restrictive). It can tighten to `autonomous` (more restrictive — blocks more actions). Non-safety settings (image, credentials, repos) follow normal precedence. The CLI emits a clear warning when an override is ignored: "Ignoring --safety minimal: .sandbox.yml sets supervised, and safety can only be tightened."
+**Safety-specific constraint:** For `safety` settings, overrides can only **tighten** policy, never relax it. This matches nah's own philosophy for per-project configs. For example, if `.crabcage.yml` sets `preset: supervised`, a CLI flag or env var cannot relax to `minimal` (less restrictive). It can tighten to `autonomous` (more restrictive — blocks more actions). Non-safety settings (image, credentials, repos) follow normal precedence. The CLI emits a clear warning when an override is ignored: "Ignoring --safety minimal: .crabcage.yml sets supervised, and safety can only be tightened."
 
 ### Config Trust Boundary
 
-**Repo-local `.sandbox.yml` can only set non-executable settings.** This prevents supply-chain attacks where a malicious repo ships a `.sandbox.yml` that runs arbitrary commands at container startup.
+**Repo-local `.crabcage.yml` can only set non-executable settings.** This prevents supply-chain attacks where a malicious repo ships a `.crabcage.yml` that runs arbitrary commands at container startup.
 
-| Setting | Repo-local `.sandbox.yml` | User global config | CLI flags |
+| Setting | Repo-local `.crabcage.yml` | User global config | CLI flags |
 |---|---|---|---|
 | `safety`, `git`, `audit` | Yes | Yes | Yes |
 | `network` | Yes (can only tighten) | Yes | Yes |
@@ -512,9 +512,9 @@ Everything else uses defaults. Credentials detected from environment. Current di
 | `credentials` | **No** | Yes | Yes |
 | `services` | **No** | Yes | Yes |
 
-If a repo-local config attempts to set restricted fields, the launcher warns: "Ignoring setup commands from .sandbox.yml — setup can only be configured in ~/.config/crabcage/config.yml or via CLI." This is printed before any commands execute.
+If a repo-local config attempts to set restricted fields, the launcher warns: "Ignoring setup commands from .crabcage.yml — setup can only be configured in ~/.config/crabcage/config.yml or via CLI." This is printed before any commands execute.
 
-On first use of a repo-local `.sandbox.yml`, the launcher displays the settings it will apply and requires confirmation.
+On first use of a repo-local `.crabcage.yml`, the launcher displays the settings it will apply and requires confirmation.
 
 ## Safety Presets
 
@@ -522,7 +522,7 @@ Three built-in presets defined by crabcage, each generating a complete `nah` con
 
 The `env/printenv/set` blocking is a **crabcage-added classification rule**, not a built-in nah action type. Crabcage generates nah `classify` entries that map these commands to a `credential_exposure` action type with the configured policy.
 
-The nah config is generated by the container entrypoint before Claude Code starts, based on the active preset + any overrides from `.sandbox.yml`. The generated config is written to `~/.config/nah/config.yaml` (owned by root, readable by claude, not writable).
+The nah config is generated by the container entrypoint before Claude Code starts, based on the active preset + any overrides from `.crabcage.yml`. The generated config is written to `~/.config/nah/config.yaml` (owned by root, readable by claude, not writable).
 
 ### `supervised` (default)
 
@@ -743,7 +743,7 @@ DNS sidecar container (dnsmasq or coredns, ~5MB):
 
 Private config in `boxshop-config` (not in the open-source repo).
 
-### `.sandbox.yml` (in boxshop-config)
+### `.crabcage.yml` (in boxshop-config)
 
 ```yaml
 agent: claude
@@ -808,7 +808,7 @@ network:
 
 Thin wrapper that:
 
-1. Reads the boxshop `.sandbox.yml` from `boxshop-config`
+1. Reads the boxshop `.crabcage.yml` from `boxshop-config`
 2. Calls `crabcage run --config <path>` under the hood
 3. Handles boxshop-specific ergonomics (auto-detects AWS SSO session, resolves `CF_API_TOKEN` from 1Password CLI if available)
 
@@ -837,7 +837,7 @@ ln -s /home/claude/repos/boxshop-config/claude/config/rules/* ~/.claude/rules/
 
 **The agent cannot modify how it runs.** All safety configuration is immutable from inside the container:
 
-- `.sandbox.yml` is **not mounted** into the container — the launcher reads it on the host and generates runtime config
+- `.crabcage.yml` is **not mounted** into the container — the launcher reads it on the host and generates runtime config
 - `~/.config/nah/config.yaml` is owned by root, readable by claude, not writable
 - `punkgo-jack` config and signing key are owned by audit user, inaccessible to claude
 - Claude Code `settings.json` and hook registration files are **mounted as individual read-only bind mounts** from the host, not writable from within the container. The rest of `/home/claude/.claude` (session history, conversation cache) remains writable on the config volume.
@@ -935,7 +935,7 @@ Same Docker image, deployed to ECS/Fargate via `km`. Enables:
 
 Requires:
 - VPC + security group setup
-- ECS task definition generated from `.sandbox.yml`
+- ECS task definition generated from `.crabcage.yml`
 - Web terminal (ttyd or similar) or SSH tunnel
 - Session lifecycle management (auto-shutdown after idle)
 - Cost controls (Fargate spot, auto-stop)
