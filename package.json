@@ -1,5 +1,5 @@
 {
-  "name": "crabcage",
+  "name": "@crabcage/cli",
   "version": "0.1.0",
   "description": "An auditable sandbox for agent harnesses",
   "type": "module",
