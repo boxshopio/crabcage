@@ -46,7 +46,7 @@ RUN npm install -g @anthropic-ai/claude-code
 
 # Install nah (safety layer — Phase 2 will configure it)
 ENV PATH="/root/.local/bin:$PATH"
-RUN /root/.local/bin/uv pip install --system nah
+RUN /root/.local/bin/uv pip install --system --break-system-packages nah
 
 # Create users
 RUN groupadd -g 1000 claude && useradd -m -u 1000 -g claude claude
@@ -56,7 +56,8 @@ RUN groupadd -g 999 audit && useradd -m -u 999 -g audit -s /bin/false audit
 RUN mkdir -p /home/claude/.claude /home/claude/.local /var/audit/receipts \
     && chown -R claude:claude /home/claude \
     && chown -R audit:audit /var/audit \
-    && chmod 700 /var/audit
+    && chmod 700 /var/audit \
+    && ln -s /home/claude/.claude/claude-config.json /home/claude/.claude.json
 
 # Add uv to claude's PATH
 RUN echo 'export PATH="/root/.local/bin:$HOME/.local/bin:$PATH"' >> /home/claude/.bashrc

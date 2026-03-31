@@ -29,9 +29,7 @@ export function generateCompose(
   const claudeDir = join(homedir(), ".claude");
   volumes.push(`${claudeDir}:/home/claude/.claude:rw`);
 
-  // Bind-mount .claude.json for subscription auth
-  const claudeJson = join(homedir(), ".claude.json");
-  volumes.push(`${claudeJson}:/home/claude/.claude.json:ro`);
+  // No need to mount .claude.json — subscription token is injected as ANTHROPIC_API_KEY
 
   // Named volume for audit logs
   volumes.push("crabcage-audit:/var/audit");
