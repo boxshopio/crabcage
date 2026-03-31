@@ -112,6 +112,14 @@ export async function runCommand(options: RunOptions): Promise<void> {
   await composeUp(composePath);
 
   if (!options.detach) {
+    if (auth.mode === "none") {
+      console.log(chalk.yellow("\nNo credentials injected. Authenticate inside the container:"));
+      console.log(chalk.dim("  crabcage shell     — open a shell in the sandbox"));
+      console.log(chalk.dim("  claude login       — authenticate Claude Code"));
+      console.log(chalk.dim("  exit               — then run: crabcage run"));
+      console.log(chalk.green("\nSandbox running in background."));
+      return;
+    }
     await attachToSandbox();
   } else {
     console.log(chalk.green("\nSandbox running in background."));
