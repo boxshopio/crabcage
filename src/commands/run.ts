@@ -43,17 +43,17 @@ export async function runCommand(options: RunOptions): Promise<void> {
   // Detect Claude auth
   const auth = detectClaudeAuth(env);
   if (auth.mode === "none") {
-    console.error(
-      chalk.red("  ✗ Claude auth       no API key or OAuth token found"),
+    console.log(
+      chalk.yellow("  ⚠ Claude auth       no API key or OAuth token found on host"),
     );
-    console.error(
-      chalk.dim("    → Set ANTHROPIC_API_KEY or run 'claude' on host to log in"),
+    console.log(
+      chalk.dim("    → Run 'claude login' inside the container to authenticate"),
     );
-    process.exit(1);
+  } else {
+    console.log(
+      chalk.green(`  ✓ Claude auth       ${auth.mode === "api_key" ? "API key" : "OAuth"}`),
+    );
   }
-  console.log(
-    chalk.green(`  ✓ Claude auth       ${auth.mode === "api_key" ? "API key" : "OAuth"}`),
-  );
 
   // Validate credentials
   if (config.credentials.length > 0) {

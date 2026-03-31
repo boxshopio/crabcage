@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { Command } from "commander";
 import { runCommand } from "./commands/run.js";
 import { stopCommand } from "./commands/stop.js";
@@ -7,12 +10,15 @@ import { statusCommand } from "./commands/status.js";
 import { updateCommand } from "./commands/update.js";
 import { cleanCommand } from "./commands/clean.js";
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf-8"));
+
 const program = new Command();
 
 program
   .name("crabcage")
   .description("An auditable sandbox for agent harnesses")
-  .version("0.1.0");
+  .version(pkg.version);
 
 program
   .command("run")
