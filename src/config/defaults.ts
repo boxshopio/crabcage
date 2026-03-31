@@ -6,10 +6,10 @@ export const DEFAULT_AGENT = "claude";
 export const DEFAULT_GIT = {
   push: true,
   create_pr: true,
-  merge: false,
-  force_push: "block" as const,
-  delete_branch: "ask" as const,
-  local_destructive: "ask" as const,
+  merge: true,
+  force_push: "allow" as const,
+  delete_branch: "allow" as const,
+  local_destructive: "allow" as const,
 };
 
 export const DEFAULT_RESOURCES = {

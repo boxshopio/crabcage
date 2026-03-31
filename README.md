@@ -93,12 +93,6 @@ audit:
   enabled: true
 ```
 
-Or walk through an interactive setup to configure your crabcage to your specifications:
-
-```bash
-crabcage init
-```
-
 ## Commands
 
 ```bash
@@ -107,8 +101,6 @@ crabcage run -d            # launch in background
 crabcage stop              # stop sandbox
 crabcage shell             # open shell in running sandbox
 crabcage status            # show running sandboxes
-crabcage audit list        # list audit receipts
-crabcage audit verify <id> # verify receipt integrity
 crabcage update            # pull latest image
 crabcage clean             # remove stopped sandboxes
 ```
