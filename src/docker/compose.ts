@@ -30,13 +30,9 @@ export function generateCompose(
   // tmpfs for scratch and user-site packages
   const tmpfs = ["/tmp", "/var/tmp", "/home/claude/.local"];
 
-  // Auth
+  // Auth — inject API key if available; OAuth users authenticate inside the container
   if (auth.mode === "api_key" && env.ANTHROPIC_API_KEY) {
     environment.push(`ANTHROPIC_API_KEY=${env.ANTHROPIC_API_KEY}`);
-  } else if (auth.mode === "oauth" && auth.credentialsPath) {
-    volumes.push(
-      `${auth.credentialsPath}:/home/claude/.claude/.credentials.json:ro`,
-    );
   }
 
   // Inject other credentials as env vars

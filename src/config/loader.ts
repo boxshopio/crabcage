@@ -74,7 +74,14 @@ export function loadConfig(options: {
   // Layer 1: Built-in defaults (applied last via applyDefaults)
   let merged: Record<string, unknown> = {};
 
-  // Layer 2: Repo-local .crabcage.yml (trust-restricted)
+  // Layer 2: User global config (personal defaults, lowest file-based precedence)
+  const globalConfigPath = join(homedir(), ".config", "crabcage", "config.yml");
+  const globalRaw = readYamlFile(globalConfigPath);
+  if (globalRaw) {
+    merged = mergeConfigs(merged, globalRaw);
+  }
+
+  // Layer 3: Repo-local .crabcage.yml (team config overrides personal, trust-restricted)
   const repoConfigPath = join(cwd, ".crabcage.yml");
   const repoRaw = readYamlFile(repoConfigPath);
   if (repoRaw) {
@@ -86,13 +93,6 @@ export function loadConfig(options: {
       );
     }
     merged = mergeConfigs(merged, stripped);
-  }
-
-  // Layer 3: User global config
-  const globalConfigPath = join(homedir(), ".config", "crabcage", "config.yml");
-  const globalRaw = readYamlFile(globalConfigPath);
-  if (globalRaw) {
-    merged = mergeConfigs(merged, globalRaw);
   }
 
   // Layer 4: Explicit --config flag (no trust restriction)

@@ -20,6 +20,18 @@ program
   .description("An auditable sandbox for agent harnesses")
   .version(pkg.version);
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function handleErrors(fn: (...args: any[]) => Promise<void>) {
+  return async (...args: any[]) => {
+    try {
+      await fn(...args);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : err);
+      process.exit(1);
+    }
+  };
+}
+
 program
   .command("run")
   .description("Launch a sandbox for your AI agent")
@@ -28,19 +40,12 @@ program
   .option("-a, --audit", "Enable cryptographic audit trail")
   .option("-d, --detach", "Run in background (detached mode)")
   .option("--allow-sensitive-mounts", "Allow mounting sensitive paths (bypasses denylist)")
-  .action(async (opts) => {
-    try {
-      await runCommand(opts);
-    } catch (err) {
-      console.error(err instanceof Error ? err.message : err);
-      process.exit(1);
-    }
-  });
+  .action(handleErrors(runCommand));
 
-program.command("stop").description("Stop the running sandbox").action(stopCommand);
-program.command("shell").description("Open a shell in the running sandbox").action(shellCommand);
-program.command("status").description("Show sandbox status").action(statusCommand);
-program.command("update").description("Pull the latest sandbox image").action(updateCommand);
-program.command("clean").description("Remove stopped sandboxes and orphan volumes").action(cleanCommand);
+program.command("stop").description("Stop the running sandbox").action(handleErrors(stopCommand));
+program.command("shell").description("Open a shell in the running sandbox").action(handleErrors(shellCommand));
+program.command("status").description("Show sandbox status").action(handleErrors(statusCommand));
+program.command("update").description("Pull the latest sandbox image").action(handleErrors(updateCommand));
+program.command("clean").description("Remove stopped sandboxes and orphan volumes").action(handleErrors(cleanCommand));
 
 program.parse();

@@ -50,9 +50,7 @@ export async function runCommand(options: RunOptions): Promise<void> {
       chalk.dim("    → Run 'claude login' inside the container to authenticate"),
     );
   } else {
-    console.log(
-      chalk.green(`  ✓ Claude auth       ${auth.mode === "api_key" ? "API key" : "OAuth"}`),
-    );
+    console.log(chalk.green("  ✓ Claude auth       API key"));
   }
 
   // Validate credentials

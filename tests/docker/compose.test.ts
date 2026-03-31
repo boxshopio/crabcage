@@ -52,16 +52,14 @@ describe("generateCompose", () => {
     expect(result.services.postgres.image).toBe("postgres:16");
   });
 
-  it("mounts OAuth credentials read-only", () => {
+  it("launches without auth when no API key is set", () => {
     const config = makeConfig();
     const mounts: ResolvedMount[] = [];
-    const auth: AuthMode = { mode: "oauth", credentialsPath: "/Users/test/.claude/.credentials.json" };
+    const auth: AuthMode = { mode: "none" };
     const result = generateCompose(config, mounts, auth, {});
 
-    const credMount = result.services.sandbox.volumes?.find((v: string) =>
-      v.includes(".credentials.json"),
-    );
-    expect(credMount).toContain(":ro");
+    const env = result.services.sandbox.environment as string[];
+    expect(env.some((e: string) => e.startsWith("ANTHROPIC_API_KEY="))).toBe(false);
   });
 
   it("includes tmpfs mounts for /tmp and /home/claude/.local", () => {

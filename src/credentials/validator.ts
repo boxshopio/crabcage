@@ -30,15 +30,14 @@ export async function validateCredential(
 
   if (cred.check) {
     try {
-      const parts = cred.check.split(" ");
-      await execa(parts[0], parts.slice(1), { timeout: 10_000 });
+      await execa("sh", ["-c", cred.check], { timeout: 10_000 });
       return { name: cred.name, valid: true };
     } catch (err: unknown) {
       if ((err as { code?: string }).code === "ENOENT") {
         return {
           name: cred.name,
           valid: true,
-          warning: `Check command '${cred.check.split(" ")[0]}' not found on host — credential unverified`,
+          warning: `Check command not found on host — credential unverified`,
         };
       }
       return {
