@@ -46,7 +46,7 @@ RUN npm install -g @anthropic-ai/claude-code
 
 # Install nah (safety layer — Phase 2 will configure it)
 ENV PATH="/root/.local/bin:$PATH"
-RUN pip3 install --break-system-packages nah
+RUN /root/.local/bin/uv pip install --system nah
 
 # Create users
 RUN groupadd -g 1000 claude && useradd -m -u 1000 -g claude claude
