@@ -42,15 +42,14 @@ export async function runCommand(options: RunOptions): Promise<void> {
 
   // Detect Claude auth
   const auth = detectClaudeAuth(env);
-  if (auth.mode === "none") {
-    console.log(
-      chalk.yellow("  ⚠ Claude auth       no API key or OAuth token found on host"),
-    );
-    console.log(
-      chalk.dim("    → Run 'claude login' inside the container to authenticate"),
-    );
-  } else {
+  if (auth.mode === "api_key") {
     console.log(chalk.green("  ✓ Claude auth       API key"));
+  } else if (auth.mode === "subscription") {
+    console.log(chalk.green("  ✓ Claude auth       subscription"));
+  } else {
+    console.error(chalk.red("  ✗ Claude auth       no API key or subscription found"));
+    console.error(chalk.dim("    → Set ANTHROPIC_API_KEY or log in with 'claude login' on your host"));
+    process.exit(1);
   }
 
   // Validate credentials
@@ -112,14 +111,6 @@ export async function runCommand(options: RunOptions): Promise<void> {
   await composeUp(composePath);
 
   if (!options.detach) {
-    if (auth.mode === "none") {
-      console.log(chalk.yellow("\nNo credentials injected. Authenticate inside the container:"));
-      console.log(chalk.dim("  crabcage shell     — open a shell in the sandbox"));
-      console.log(chalk.dim("  claude login       — authenticate Claude Code"));
-      console.log(chalk.dim("  exit               — then run: crabcage run"));
-      console.log(chalk.green("\nSandbox running in background."));
-      return;
-    }
     await attachToSandbox();
   } else {
     console.log(chalk.green("\nSandbox running in background."));

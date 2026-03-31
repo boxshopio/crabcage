@@ -15,7 +15,7 @@ describe("generateCompose", () => {
     const mounts: ResolvedMount[] = [
       { hostPath: "/Users/test/project", containerPath: "/home/claude/work", readOnly: false },
     ];
-    const auth: AuthMode = { mode: "api_key" };
+    const auth: AuthMode = { mode: "api_key", apiKey: "sk-test" };
     const result = generateCompose(config, mounts, auth, { ANTHROPIC_API_KEY: "sk-test" });
 
     expect(result.services.sandbox).toBeDefined();
@@ -31,7 +31,7 @@ describe("generateCompose", () => {
   it("includes resource limits", () => {
     const config = makeConfig({ resources: { memory: "16g", cpus: 8, timeout: "0", idle_timeout: "0" } });
     const mounts: ResolvedMount[] = [];
-    const auth: AuthMode = { mode: "api_key" };
+    const auth: AuthMode = { mode: "api_key", apiKey: "sk-test" };
     const result = generateCompose(config, mounts, auth, { ANTHROPIC_API_KEY: "sk-test" });
 
     expect(result.services.sandbox.mem_limit).toBe("16g");
@@ -45,19 +45,21 @@ describe("generateCompose", () => {
       },
     });
     const mounts: ResolvedMount[] = [];
-    const auth: AuthMode = { mode: "api_key" };
+    const auth: AuthMode = { mode: "api_key", apiKey: "sk-test" };
     const result = generateCompose(config, mounts, auth, { ANTHROPIC_API_KEY: "sk-test" });
 
     expect(result.services.postgres).toBeDefined();
     expect(result.services.postgres.image).toBe("postgres:16");
   });
 
-  it("launches without auth when no API key is set", () => {
+  it("mounts host .claude directory for subscription auth", () => {
     const config = makeConfig();
     const mounts: ResolvedMount[] = [];
     const auth: AuthMode = { mode: "none" };
     const result = generateCompose(config, mounts, auth, {});
 
+    const vols = result.services.sandbox.volumes as string[];
+    expect(vols.some((v: string) => v.includes(".claude") && v.includes("/home/claude/.claude"))).toBe(true);
     const env = result.services.sandbox.environment as string[];
     expect(env.some((e: string) => e.startsWith("ANTHROPIC_API_KEY="))).toBe(false);
   });
@@ -65,7 +67,7 @@ describe("generateCompose", () => {
   it("includes tmpfs mounts for /tmp and /home/claude/.local", () => {
     const config = makeConfig();
     const mounts: ResolvedMount[] = [];
-    const auth: AuthMode = { mode: "api_key" };
+    const auth: AuthMode = { mode: "api_key", apiKey: "sk-test" };
     const result = generateCompose(config, mounts, auth, { ANTHROPIC_API_KEY: "sk-test" });
 
     expect(result.services.sandbox.tmpfs).toContain("/tmp");
@@ -76,7 +78,7 @@ describe("generateCompose", () => {
   it("includes security hardening defaults", () => {
     const config = makeConfig();
     const mounts: ResolvedMount[] = [];
-    const auth: AuthMode = { mode: "api_key" };
+    const auth: AuthMode = { mode: "api_key", apiKey: "sk-test" };
     const result = generateCompose(config, mounts, auth, { ANTHROPIC_API_KEY: "sk-test" });
 
     expect(result.services.sandbox.security_opt).toEqual(["no-new-privileges"]);
@@ -86,7 +88,7 @@ describe("generateCompose", () => {
   it("assigns all services to crabcage-net", () => {
     const config = makeConfig();
     const mounts: ResolvedMount[] = [];
-    const auth: AuthMode = { mode: "api_key" };
+    const auth: AuthMode = { mode: "api_key", apiKey: "sk-test" };
     const result = generateCompose(config, mounts, auth, { ANTHROPIC_API_KEY: "sk-test" });
 
     expect(result.services.sandbox.networks).toEqual(["crabcage-net"]);

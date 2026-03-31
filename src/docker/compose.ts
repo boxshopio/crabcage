@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { CrabcageConfig } from "../config/schema.js";
 import type { ResolvedMount } from "../mounts/resolver.js";
 import type { AuthMode } from "../credentials/detect-auth.js";
@@ -23,16 +25,23 @@ export function generateCompose(
     volumes.push(`${mount.hostPath}:${mount.containerPath}:${suffix}`);
   }
 
-  // Named volumes for persistent state
-  volumes.push("crabcage-config:/home/claude/.claude");
+  // Bind-mount host's .claude directory for settings persistence
+  const claudeDir = join(homedir(), ".claude");
+  volumes.push(`${claudeDir}:/home/claude/.claude:rw`);
+
+  // Bind-mount .claude.json for subscription auth
+  const claudeJson = join(homedir(), ".claude.json");
+  volumes.push(`${claudeJson}:/home/claude/.claude.json:ro`);
+
+  // Named volume for audit logs
   volumes.push("crabcage-audit:/var/audit");
 
   // tmpfs for scratch and user-site packages
   const tmpfs = ["/tmp", "/var/tmp", "/home/claude/.local"];
 
-  // Auth — inject API key if available; OAuth users authenticate inside the container
-  if (auth.mode === "api_key" && env.ANTHROPIC_API_KEY) {
-    environment.push(`ANTHROPIC_API_KEY=${env.ANTHROPIC_API_KEY}`);
+  // Auth — inject API key or subscription token
+  if (auth.apiKey) {
+    environment.push(`ANTHROPIC_API_KEY=${auth.apiKey}`);
   }
 
   // Inject other credentials as env vars
@@ -93,7 +102,6 @@ export function generateCompose(
       "crabcage-net": { driver: "bridge" },
     },
     volumes: {
-      "crabcage-config": {},
       "crabcage-audit": {},
     },
   };
